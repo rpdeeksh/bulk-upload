@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Patent Bulk Upload - Lextria</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gradient-to-br from-blue-50 to-indigo-100 min-h-screen">
+    
+    <!-- Login Section -->
+    <div id="loginSection" class="min-h-screen flex items-center justify-center px-4">
+        <div class="bg-white rounded-2xl shadow-xl p-8 w-full max-w-md">
+            <div class="text-center mb-8">
+                <h1 class="text-3xl font-bold text-gray-800">Lextria Patent System</h1>
+                <p class="text-gray-600 mt-2">Sign in to upload patents</p>
+            </div>
+            
+            <form id="loginForm" class="space-y-6">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Email</label>
+                    <input 
+                        type="email" 
+                        id="email" 
+                        value="admin@lextria.com"
+                        class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
+                        required
+                    >
+                </div>
+                
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Password</label>
+                    <input 
+                        type="password" 
+                        id="password" 
+                        value="admin123"
+                        class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
+                        required
+                    >
+                </div>
+                
+                <button 
+                    type="submit" 
+                    id="loginBtn"
+                    class="w-full bg-blue-600 text-white py-3 px-6 rounded-lg font-semibold hover:bg-blue-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
+                >
+                    Sign In
+                </button>
+                
+                <div id="loginError" class="hidden text-red-600 text-sm text-center"></div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Upload Section -->
+    <div id="uploadSection" class="hidden min-h-screen py-12 px-4">
+        <div class="max-w-5xl mx-auto">
+            <!-- Header -->
+            <div class="bg-white rounded-2xl shadow-lg p-6 mb-6 flex justify-between items-center">
+                <div>
+                    <h1 class="text-2xl font-bold text-gray-800">Patent Bulk Upload</h1>
+                    <p class="text-gray-600 mt-1" id="userInfo"></p>
+                </div>
+                <button 
+                    onclick="logout()" 
+                    class="bg-red-500 text-white px-6 py-2 rounded-lg hover:bg-red-600 transition-colors"
+                >
+                    Logout
+                </button>
+            </div>
+
+            <!-- Upload Card -->
+            <div class="bg-white rounded-2xl shadow-lg p-8">
+                <div class="mb-6">
+                    <h2 class="text-xl font-semibold text-gray-800 mb-2">Upload CSV File</h2>
+                    <p class="text-gray-600 text-sm">Supported format: .csv only</p>
+                </div>
+
+                <form id="uploadForm" class="space-y-6">
+                    <!-- File Upload Area -->
+                    <div 
+                        id="dropZone"
+                        class="border-2 border-dashed border-gray-300 rounded-xl p-12 text-center hover:border-blue-500 transition-colors cursor-pointer bg-gray-50 hover:bg-blue-50"
+                    >
+                        <input 
+                            type="file" 
+                            id="fileInput" 
+                            accept=".csv" 
+                            class="hidden" 
+                            required
+                        >
+                        <label for="fileInput" class="cursor-pointer">
+                            <svg class="mx-auto h-16 w-16 text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                            </svg>
+                            <p class="text-lg font-semibold text-gray-700 mb-1">
+                                Click to upload or drag and drop
+                            </p>
+                            <p class="text-sm text-gray-500">CSV file (.csv)</p>
+                            <p id="fileName" class="mt-4 text-base font-medium text-blue-600"></p>
+                        </label>
+                    </div>
+
+                    <!-- Action Buttons -->
+                    <div class="flex gap-4">
+                        <button 
+                            type="button"
+                            id="validateBtn"
+                            onclick="validateFile()"
+                            class="flex-1 bg-yellow-500 text-white py-3 px-6 rounded-lg font-semibold hover:bg-yellow-600 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
+                        >
+                            Validate File
+                        </button>
+                        <button 
+                            type="submit"
+                            id="uploadBtn"
+                            class="flex-1 bg-blue-600 text-white py-3 px-6 rounded-lg font-semibold hover:bg-blue-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
+                        >
+                            Upload Patents
+                        </button>
+                    </div>
+                </form>
+
+                <!-- Progress Bar -->
+                <div id="progressSection" class="hidden mt-6">
+                    <div class="bg-gray-200 rounded-full h-3 overflow-hidden">
+                        <div id="progressBar" class="bg-blue-600 h-3 transition-all duration-300" style="width: 0%"></div>
+                    </div>
+                    <p id="progressText" class="text-sm text-gray-600 mt-2 text-center"></p>
+                </div>
+
+                <!-- Results Section -->
+                <div id="results" class="hidden mt-6"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE_URL = 'https://backend-ojul.onrender.com/api';
+        let authToken = null;
+        let currentUser = null;
+
+        // Check if already logged in
+        window.onload = function() {
+            const token = localStorage.getItem('authToken');
+            const user = localStorage.getItem('currentUser');
+            
+            if (token && user) {
+                authToken = token;
+                currentUser = JSON.parse(user);
+                showUploadSection();
+            }
+        };
+
+        // Login Form Handler
+        document.getElementById('loginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+            const loginBtn = document.getElementById('loginBtn');
+            const loginError = document.getElementById('loginError');
+            
+            loginBtn.disabled = true;
+            loginBtn.textContent = 'Signing in...';
+            loginError.classList.add('hidden');
+            
+            try {
+                const response = await fetch(`${API_BASE_URL}/auth/login?email=${encodeURIComponent(email)}&password=${encodeURIComponent(password)}`, {
+                    method: 'POST',
+                    headers: {
+                        'accept': 'application/json'
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Invalid credentials');
+                }
+                
+                const data = await response.json();
+                authToken = data.access_token;
+                currentUser = data.user;
+                
+                // Store in localStorage
+                localStorage.setItem('authToken', authToken);
+                localStorage.setItem('currentUser', JSON.stringify(currentUser));
+                
+                showUploadSection();
+                
+            } catch (error) {
+                loginError.textContent = error.message || 'Login failed';
+                loginError.classList.remove('hidden');
+            } finally {
+                loginBtn.disabled = false;
+                loginBtn.textContent = 'Sign In';
+            }
+        });
+
+        function showUploadSection() {
+            document.getElementById('loginSection').classList.add('hidden');
+            document.getElementById('uploadSection').classList.remove('hidden');
+            document.getElementById('userInfo').textContent = `Logged in as ${currentUser.full_name} (${currentUser.role})`;
+        }
+
+        function logout() {
+            localStorage.removeItem('authToken');
+            localStorage.removeItem('currentUser');
+            authToken = null;
+            currentUser = null;
+            document.getElementById('loginSection').classList.remove('hidden');
+            document.getElementById('uploadSection').classList.add('hidden');
+            document.getElementById('loginForm').reset();
+        }
+
+        // File Input Handler
+        const fileInput = document.getElementById('fileInput');
+        const fileName = document.getElementById('fileName');
+        const dropZone = document.getElementById('dropZone');
+
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                const file = e.target.files[0];
+                if (file.name.endsWith('.csv')) {
+                    fileName.textContent = `Selected: ${file.name}`;
+                } else {
+                    fileName.textContent = '';
+                    alert('Please select a CSV file');
+                    fileInput.value = '';
+                }
+            }
+        });
+
+        // Drag and Drop
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('border-blue-500', 'bg-blue-50');
+        });
+
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('border-blue-500', 'bg-blue-50');
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('border-blue-500', 'bg-blue-50');
+            
+            if (e.dataTransfer.files.length > 0) {
+                const file = e.dataTransfer.files[0];
+                if (file.name.endsWith('.csv')) {
+                    fileInput.files = e.dataTransfer.files;
+                    fileName.textContent = `Selected: ${file.name}`;
+                } else {
+                    alert('Please drop a CSV file');
+                }
+            }
+        });
+
+        // Validate File Function
+        async function validateFile() {
+            const file = fileInput.files[0];
+            if (!file) {
+                alert('Please select a file first');
+                return;
+            }
+
+            if (!file.name.endsWith('.csv')) {
+                alert('Please select a CSV file');
+                return;
+            }
+
+            await uploadFile('/patents/bulk-upload-validate', 'Validating...');
+        }
+
+        // Upload Form Handler
+        document.getElementById('uploadForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const file = fileInput.files[0];
+            if (!file.name.endsWith('.csv')) {
+                alert('Please select a CSV file');
+                return;
+            }
+            
+            await uploadFile('/patents/bulk-upload', 'Uploading...');
+        });
+
+        // Upload File Function
+        async function uploadFile(endpoint, progressMessage) {
+            const file = fileInput.files[0];
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            const uploadBtn = document.getElementById('uploadBtn');
+            const validateBtn = document.getElementById('validateBtn');
+            const progressSection = document.getElementById('progressSection');
+            const progressBar = document.getElementById('progressBar');
+            const progressText = document.getElementById('progressText');
+            const results = document.getElementById('results');
+            
+            uploadBtn.disabled = true;
+            validateBtn.disabled = true;
+            progressSection.classList.remove('hidden');
+            results.classList.add('hidden');
+            progressBar.style.width = '30%';
+            progressText.textContent = progressMessage;
+            
+            try {
+                const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${authToken}`,
+                        'accept': 'application/json'
+                    },
+                    body: formData
+                });
+                
+                progressBar.style.width = '100%';
+                const data = await response.json();
+                
+                if (response.ok) {
+                    displayResults(data, true);
+                } else {
+                    displayResults(data, false);
+                }
+                
+            } catch (error) {
+                displayResults({ detail: error.message }, false);
+            } finally {
+                uploadBtn.disabled = false;
+                validateBtn.disabled = false;
+                progressSection.classList.add('hidden');
+                progressBar.style.width = '0%';
+            }
+        }
+
+        // Display Results Function
+        function displayResults(data, success) {
+            const results = document.getElementById('results');
+            results.classList.remove('hidden');
+            
+            if (success) {
+                const resultData = data.results || data;
+                results.className = 'mt-6 p-6 rounded-xl bg-green-50 border-2 border-green-200';
+                
+                let html = `
+                    <div class="flex items-start gap-3 mb-4">
+                        <svg class="w-6 h-6 text-green-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <div class="flex-1">
+                            <h3 class="text-lg font-semibold text-green-800">${data.message || 'Success'}</h3>
+                `;
+                
+                if (resultData.total_success !== undefined) {
+                    html += `
+                        <p class="text-green-700 mt-2">✓ Successfully processed: <span class="font-semibold">${resultData.total_success}</span> patents</p>
+                        ${resultData.total_errors > 0 ? `<p class="text-orange-600 mt-1">⚠ Errors: <span class="font-semibold">${resultData.total_errors}</span></p>` : ''}
+                    `;
+                }
+                
+                if (resultData.total_patents !== undefined || resultData.valid_patents !== undefined) {
+                    const count = resultData.total_patents || resultData.valid_patents;
+                    html += `<p class="text-green-700 mt-2">✓ Valid patents found: <span class="font-semibold">${count}</span></p>`;
+                }
+                
+                // Display errors if any
+                if (resultData.errors && resultData.errors.length > 0) {
+                    html += '<div class="mt-4 bg-orange-50 p-3 rounded-lg border border-orange-200">';
+                    html += '<p class="font-semibold text-orange-800 mb-2">Errors Found:</p>';
+                    html += '<ul class="text-sm text-orange-700 space-y-1">';
+                    resultData.errors.slice(0, 5).forEach(error => {
+                        html += `<li>Row ${error.row}: ${error.error}</li>`;
+                    });
+                    if (resultData.errors.length > 5) {
+                        html += `<li class="font-semibold">... and ${resultData.errors.length - 5} more errors</li>`;
+                    }
+                    html += '</ul></div>';
+                }
+                
+                html += '</div></div>';
+                results.innerHTML = html;
+            } else {
+                results.className = 'mt-6 p-6 rounded-xl bg-red-50 border-2 border-red-200';
+                results.innerHTML = `
+                    <div class="flex items-start gap-3">
+                        <svg class="w-6 h-6 text-red-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <div>
+                            <h3 class="text-lg font-semibold text-red-800">Error</h3>
+                            <p class="text-red-700 mt-1">${data.detail || 'An error occurred'}</p>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+    </script>
+</body>
+</html>
