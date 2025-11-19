@@ -3,8 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Patent Bulk Upload - Lextria</title>
+    <title>Patent Excel Bulk Upload - Lextria</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- SheetJS library for Excel parsing -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 <body class="bg-gradient-to-br from-blue-50 to-indigo-100 min-h-screen">
     
@@ -58,7 +60,7 @@
             <!-- Header -->
             <div class="bg-white rounded-2xl shadow-lg p-6 mb-6 flex justify-between items-center">
                 <div>
-                    <h1 class="text-2xl font-bold text-gray-800">Patent Bulk Upload</h1>
+                    <h1 class="text-2xl font-bold text-gray-800">Patent Excel Bulk Upload</h1>
                     <p class="text-gray-600 mt-1" id="userInfo"></p>
                 </div>
                 <button 
@@ -72,8 +74,8 @@
             <!-- Upload Card -->
             <div class="bg-white rounded-2xl shadow-lg p-8">
                 <div class="mb-6">
-                    <h2 class="text-xl font-semibold text-gray-800 mb-2">Upload CSV File</h2>
-                    <p class="text-gray-600 text-sm">Supported format: .csv only</p>
+                    <h2 class="text-xl font-semibold text-gray-800 mb-2">Upload Excel File</h2>
+                    <p class="text-gray-600 text-sm">Supported formats: .xlsx, .xls</p>
                 </div>
 
                 <form id="uploadForm" class="space-y-6">
@@ -85,7 +87,7 @@
                         <input 
                             type="file" 
                             id="fileInput" 
-                            accept=".csv" 
+                            accept=".xlsx,.xls" 
                             class="hidden" 
                             required
                         >
@@ -96,20 +98,29 @@
                             <p class="text-lg font-semibold text-gray-700 mb-1">
                                 Click to upload or drag and drop
                             </p>
-                            <p class="text-sm text-gray-500">CSV file (.csv)</p>
+                            <p class="text-sm text-gray-500">Excel file (.xlsx, .xls)</p>
                             <p id="fileName" class="mt-4 text-base font-medium text-blue-600"></p>
                         </label>
+                    </div>
+
+                    <!-- Preview Section -->
+                    <div id="previewSection" class="hidden">
+                        <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+                            <h3 class="font-semibold text-blue-800 mb-2">Preview</h3>
+                            <p id="previewText" class="text-sm text-blue-700"></p>
+                            <div id="sampleData" class="mt-3 text-xs bg-white p-3 rounded border border-blue-100 overflow-x-auto"></div>
+                        </div>
                     </div>
 
                     <!-- Action Buttons -->
                     <div class="flex gap-4">
                         <button 
                             type="button"
-                            id="validateBtn"
-                            onclick="validateFile()"
+                            id="parseBtn"
+                            onclick="parseExcel()"
                             class="flex-1 bg-yellow-500 text-white py-3 px-6 rounded-lg font-semibold hover:bg-yellow-600 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
                         >
-                            Validate File
+                            Parse & Preview
                         </button>
                         <button 
                             type="submit"
@@ -132,6 +143,31 @@
                 <!-- Results Section -->
                 <div id="results" class="hidden mt-6"></div>
             </div>
+
+            <!-- CSV Format Help -->
+            <div class="bg-white rounded-2xl shadow-lg p-6 mt-6">
+                <h3 class="text-lg font-semibold text-gray-800 mb-3">Excel Format Guide</h3>
+                <p class="text-sm text-gray-600 mb-3">Your Excel file should include these columns:</p>
+                <div class="bg-gray-50 p-4 rounded-lg text-xs font-mono overflow-x-auto">
+                    <div class="mb-2"><strong>Required columns:</strong></div>
+                    <div>tracking_id, patent_title, patent_applicant, client_id</div>
+                    <div class="mt-3 mb-2"><strong>Optional columns:</strong></div>
+                    <div>patent_type, application_no, date_of_filing, applicant_address,</div>
+                    <div>inventor_email, inventor_phone, professional_fees, reimbursement,</div>
+                    <div>notes, priority, inventors</div>
+                </div>
+                <p class="text-sm text-gray-600 mt-3">
+                    Patent types: <code class="bg-gray-100 px-2 py-1 rounded">PS_ONLY</code>, 
+                    <code class="bg-gray-100 px-2 py-1 rounded ml-1">CS_ONLY</code>, 
+                    <code class="bg-gray-100 px-2 py-1 rounded ml-1">PS_TO_CS</code>
+                </p>
+                <p class="text-sm text-gray-600 mt-2">
+                    Priority levels: <code class="bg-gray-100 px-2 py-1 rounded">low</code>, 
+                    <code class="bg-gray-100 px-2 py-1 rounded ml-1">normal</code>, 
+                    <code class="bg-gray-100 px-2 py-1 rounded ml-1">high</code>, 
+                    <code class="bg-gray-100 px-2 py-1 rounded ml-1">urgent</code>
+                </p>
+            </div>
         </div>
     </div>
 
@@ -139,6 +175,7 @@
         const API_BASE_URL = 'https://backend-ojul.onrender.com/api';
         let authToken = null;
         let currentUser = null;
+        let parsedPatents = [];
 
         // Check if already logged in
         window.onload = function() {
@@ -181,7 +218,6 @@
                 authToken = data.access_token;
                 currentUser = data.user;
                 
-                // Store in localStorage
                 localStorage.setItem('authToken', authToken);
                 localStorage.setItem('currentUser', JSON.stringify(currentUser));
                 
@@ -210,6 +246,7 @@
             document.getElementById('loginSection').classList.remove('hidden');
             document.getElementById('uploadSection').classList.add('hidden');
             document.getElementById('loginForm').reset();
+            parsedPatents = [];
         }
 
         // File Input Handler
@@ -220,11 +257,16 @@
         fileInput.addEventListener('change', (e) => {
             if (e.target.files.length > 0) {
                 const file = e.target.files[0];
-                if (file.name.endsWith('.csv')) {
+                const validExtensions = ['.xlsx', '.xls'];
+                const fileExt = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
+                
+                if (validExtensions.includes(fileExt)) {
                     fileName.textContent = `Selected: ${file.name}`;
+                    document.getElementById('previewSection').classList.add('hidden');
+                    parsedPatents = [];
                 } else {
                     fileName.textContent = '';
-                    alert('Please select a CSV file');
+                    alert('Please select an Excel file (.xlsx or .xls)');
                     fileInput.value = '';
                 }
             }
@@ -246,91 +288,249 @@
             
             if (e.dataTransfer.files.length > 0) {
                 const file = e.dataTransfer.files[0];
-                if (file.name.endsWith('.csv')) {
+                const validExtensions = ['.xlsx', '.xls'];
+                const fileExt = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
+                
+                if (validExtensions.includes(fileExt)) {
                     fileInput.files = e.dataTransfer.files;
                     fileName.textContent = `Selected: ${file.name}`;
+                    document.getElementById('previewSection').classList.add('hidden');
+                    parsedPatents = [];
                 } else {
-                    alert('Please drop a CSV file');
+                    alert('Please drop an Excel file (.xlsx or .xls)');
                 }
             }
         });
 
-        // Validate File Function
-        async function validateFile() {
+        // Parse Excel Function
+        function parseExcel() {
             const file = fileInput.files[0];
             if (!file) {
                 alert('Please select a file first');
                 return;
             }
 
-            if (!file.name.endsWith('.csv')) {
-                alert('Please select a CSV file');
-                return;
-            }
+            const reader = new FileReader();
+            
+            reader.onload = function(e) {
+                try {
+                    const data = new Uint8Array(e.target.result);
+                    const workbook = XLSX.read(data, { type: 'array' });
+                    
+                    // Get first sheet
+                    const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+                    const jsonData = XLSX.utils.sheet_to_json(firstSheet);
+                    
+                    if (jsonData.length === 0) {
+                        alert('No data found in Excel file');
+                        return;
+                    }
 
-            await uploadFile('/patents/bulk-upload-validate', 'Validating...');
+                    console.log('Raw Excel data:', jsonData);
+
+                    // Convert to patent format with validation
+                    parsedPatents = jsonData.map((row, index) => {
+                        try {
+                            // Parse inventors JSON string
+                            let inventors = [];
+                            if (row.inventors) {
+                                try {
+                                    // Handle double-escaped quotes
+                                    let inventorsStr = row.inventors;
+                                    if (typeof inventorsStr === 'string') {
+                                        inventorsStr = inventorsStr.replace(/""/g, '"');
+                                        inventors = JSON.parse(inventorsStr);
+                                    }
+                                } catch (e) {
+                                    console.error(`Error parsing inventors for row ${index + 1}:`, e);
+                                    inventors = [{ 
+                                        inventor_name: 'Unknown', 
+                                        inventor_address: 'Unknown' 
+                                    }];
+                                }
+                            } else {
+                                // Default inventor if not provided
+                                inventors = [{ 
+                                    inventor_name: 'Not Provided', 
+                                    inventor_address: 'Not Provided' 
+                                }];
+                            }
+
+                            // Validate required fields
+                            if (!row.tracking_id || !row.patent_title || !row.patent_applicant || !row.client_id) {
+                                console.warn(`Row ${index + 1} missing required fields:`, row);
+                            }
+
+                            // Format date properly
+                            let dateOfFiling = '';
+                            if (row.date_of_filing) {
+                                // If it's an Excel date number, convert it
+                                if (typeof row.date_of_filing === 'number') {
+                                    const date = XLSX.SSF.parse_date_code(row.date_of_filing);
+                                    dateOfFiling = `${date.y}-${String(date.m).padStart(2, '0')}-${String(date.d).padStart(2, '0')}`;
+                                } else {
+                                    dateOfFiling = String(row.date_of_filing);
+                                }
+                            }
+
+                            const patent = {
+                                tracking_id: String(row.tracking_id || ''),
+                                patent_title: String(row.patent_title || ''),
+                                patent_type: row.patent_type || 'CS_ONLY',
+                                patent_applicant: String(row.patent_applicant || ''),
+                                client_id: String(row.client_id || ''),
+                                application_no: row.application_no ? String(row.application_no) : '',
+                                date_of_filing: dateOfFiling,
+                                applicant_address: String(row.applicant_address || ''),
+                                inventor_email: String(row.inventor_email || ''),
+                                inventor_phone: String(row.inventor_phone || ''),
+                                professional_fees: parseFloat(row.professional_fees) || 0,
+                                reimbursement: parseFloat(row.reimbursement) || 0,
+                                notes: String(row.notes || ''),
+                                priority: row.priority || 'normal',
+                                inventors: inventors,
+                                selected_forms: []
+                            };
+
+                            return patent;
+                        } catch (error) {
+                            console.error(`Error processing row ${index + 1}:`, error, row);
+                            return null;
+                        }
+                    }).filter(patent => patent !== null);
+
+                    // Show preview
+                    const previewSection = document.getElementById('previewSection');
+                    const previewText = document.getElementById('previewText');
+                    const sampleData = document.getElementById('sampleData');
+                    
+                    previewSection.classList.remove('hidden');
+                    previewText.textContent = `✓ Parsed ${parsedPatents.length} patents successfully. Ready to upload!`;
+                    
+                    // Show first patent as sample
+                    if (parsedPatents.length > 0) {
+                        sampleData.innerHTML = `<strong>Sample (First Patent):</strong><pre class="mt-2">${JSON.stringify(parsedPatents[0], null, 2)}</pre>`;
+                    }
+                    
+                    console.log('Parsed patents:', parsedPatents);
+                    console.log('First patent sample:', parsedPatents[0]);
+
+                } catch (error) {
+                    alert('Error parsing Excel file: ' + error.message);
+                    console.error('Parse error:', error);
+                }
+            };
+
+            reader.readAsArrayBuffer(file);
         }
 
         // Upload Form Handler
         document.getElementById('uploadForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             
-            const file = fileInput.files[0];
-            if (!file.name.endsWith('.csv')) {
-                alert('Please select a CSV file');
+            if (parsedPatents.length === 0) {
+                alert('Please parse the Excel file first using "Parse & Preview" button');
                 return;
             }
             
-            await uploadFile('/patents/bulk-upload', 'Uploading...');
+            await uploadPatents();
         });
 
-        // Upload File Function
-        async function uploadFile(endpoint, progressMessage) {
-            const file = fileInput.files[0];
-            const formData = new FormData();
-            formData.append('file', file);
-            
+        // Upload Patents Function
+        async function uploadPatents() {
             const uploadBtn = document.getElementById('uploadBtn');
-            const validateBtn = document.getElementById('validateBtn');
+            const parseBtn = document.getElementById('parseBtn');
             const progressSection = document.getElementById('progressSection');
             const progressBar = document.getElementById('progressBar');
             const progressText = document.getElementById('progressText');
             const results = document.getElementById('results');
             
             uploadBtn.disabled = true;
-            validateBtn.disabled = true;
+            parseBtn.disabled = true;
             progressSection.classList.remove('hidden');
             results.classList.add('hidden');
-            progressBar.style.width = '30%';
-            progressText.textContent = progressMessage;
             
-            try {
-                const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-                    method: 'POST',
-                    headers: {
-                        'Authorization': `Bearer ${authToken}`,
-                        'accept': 'application/json'
-                    },
-                    body: formData
-                });
+            let successCount = 0;
+            let errorCount = 0;
+            const errors = [];
+            
+            for (let i = 0; i < parsedPatents.length; i++) {
+                const patent = parsedPatents[i];
+                const progress = ((i + 1) / parsedPatents.length) * 100;
                 
-                progressBar.style.width = '100%';
-                const data = await response.json();
+                progressBar.style.width = progress + '%';
+                progressText.textContent = `Uploading patent ${i + 1} of ${parsedPatents.length}: ${patent.tracking_id}`;
                 
-                if (response.ok) {
-                    displayResults(data, true);
-                } else {
-                    displayResults(data, false);
+                try {
+                    console.log(`Uploading patent ${i + 1}:`, patent);
+                    
+                    const response = await fetch(`${API_BASE_URL}/patents`, {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${authToken}`,
+                            'Content-Type': 'application/json',
+                            'accept': 'application/json'
+                        },
+                        body: JSON.stringify(patent)
+                    });
+                    
+                    if (response.ok) {
+                        successCount++;
+                        console.log(`✓ Patent ${i + 1} uploaded successfully`);
+                    } else {
+                        const errorData = await response.json();
+                        errorCount++;
+                        console.error(`✗ Patent ${i + 1} failed:`, errorData);
+                        
+                        let errorMsg = 'Unknown error';
+                        if (errorData.detail) {
+                            if (Array.isArray(errorData.detail)) {
+                                errorMsg = errorData.detail.map(e => `${e.loc.join('.')}: ${e.msg}`).join(', ');
+                            } else {
+                                errorMsg = errorData.detail;
+                            }
+                        }
+                        
+                        errors.push({
+                            row: i + 1,
+                            tracking_id: patent.tracking_id,
+                            error: errorMsg
+                        });
+                    }
+                } catch (error) {
+                    errorCount++;
+                    console.error(`✗ Patent ${i + 1} error:`, error);
+                    errors.push({
+                        row: i + 1,
+                        tracking_id: patent.tracking_id,
+                        error: error.message
+                    });
                 }
                 
-            } catch (error) {
-                displayResults({ detail: error.message }, false);
-            } finally {
-                uploadBtn.disabled = false;
-                validateBtn.disabled = false;
+                // Small delay to avoid rate limiting
+                await new Promise(resolve => setTimeout(resolve, 100));
+            }
+            
+            progressBar.style.width = '100%';
+            progressText.textContent = 'Upload complete!';
+            
+            // Display results
+            displayResults({
+                message: 'Upload process completed',
+                results: {
+                    total_success: successCount,
+                    total_errors: errorCount,
+                    errors: errors
+                }
+            }, errorCount === 0);
+            
+            uploadBtn.disabled = false;
+            parseBtn.disabled = false;
+            
+            setTimeout(() => {
                 progressSection.classList.add('hidden');
                 progressBar.style.width = '0%';
-            }
+            }, 2000);
         }
 
         // Display Results Function
@@ -338,7 +538,7 @@
             const results = document.getElementById('results');
             results.classList.remove('hidden');
             
-            if (success) {
+            if (success || data.results.total_success > 0) {
                 const resultData = data.results || data;
                 results.className = 'mt-6 p-6 rounded-xl bg-green-50 border-2 border-green-200';
                 
@@ -349,31 +549,18 @@
                         </svg>
                         <div class="flex-1">
                             <h3 class="text-lg font-semibold text-green-800">${data.message || 'Success'}</h3>
+                            <p class="text-green-700 mt-2">✓ Successfully uploaded: <span class="font-semibold">${resultData.total_success}</span> patents</p>
+                            ${resultData.total_errors > 0 ? `<p class="text-orange-600 mt-1">⚠ Errors: <span class="font-semibold">${resultData.total_errors}</span></p>` : ''}
                 `;
-                
-                if (resultData.total_success !== undefined) {
-                    html += `
-                        <p class="text-green-700 mt-2">✓ Successfully processed: <span class="font-semibold">${resultData.total_success}</span> patents</p>
-                        ${resultData.total_errors > 0 ? `<p class="text-orange-600 mt-1">⚠ Errors: <span class="font-semibold">${resultData.total_errors}</span></p>` : ''}
-                    `;
-                }
-                
-                if (resultData.total_patents !== undefined || resultData.valid_patents !== undefined) {
-                    const count = resultData.total_patents || resultData.valid_patents;
-                    html += `<p class="text-green-700 mt-2">✓ Valid patents found: <span class="font-semibold">${count}</span></p>`;
-                }
                 
                 // Display errors if any
                 if (resultData.errors && resultData.errors.length > 0) {
                     html += '<div class="mt-4 bg-orange-50 p-3 rounded-lg border border-orange-200">';
                     html += '<p class="font-semibold text-orange-800 mb-2">Errors Found:</p>';
-                    html += '<ul class="text-sm text-orange-700 space-y-1">';
-                    resultData.errors.slice(0, 5).forEach(error => {
-                        html += `<li>Row ${error.row}: ${error.error}</li>`;
+                    html += '<ul class="text-sm text-orange-700 space-y-1 max-h-60 overflow-y-auto">';
+                    resultData.errors.forEach(error => {
+                        html += `<li><strong>Row ${error.row} (${error.tracking_id}):</strong> ${error.error}</li>`;
                     });
-                    if (resultData.errors.length > 5) {
-                        html += `<li class="font-semibold">... and ${resultData.errors.length - 5} more errors</li>`;
-                    }
                     html += '</ul></div>';
                 }
                 
@@ -388,7 +575,7 @@
                         </svg>
                         <div>
                             <h3 class="text-lg font-semibold text-red-800">Error</h3>
-                            <p class="text-red-700 mt-1">${data.detail || 'An error occurred'}</p>
+                            <p class="text-red-700 mt-1">${data.detail || 'All uploads failed'}</p>
                         </div>
                     </div>
                 `;
