@@ -9,7 +9,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 <body class="bg-gradient-to-br from-blue-50 to-indigo-100 min-h-screen">
-    
+
     <!-- Login Section -->
     <div id="loginSection" class="min-h-screen flex items-center justify-center px-4">
         <div class="bg-white rounded-2xl shadow-xl p-8 w-full max-w-md">
@@ -17,7 +17,7 @@
                 <h1 class="text-3xl font-bold text-gray-800">Lextria Patent System</h1>
                 <p class="text-gray-600 mt-2">Sign in to upload patents</p>
             </div>
-            
+
             <form id="loginForm" class="space-y-6">
                 <div>
                     <label class="block text-sm font-medium text-gray-700 mb-2">Email</label>
@@ -29,7 +29,7 @@
                         required
                     >
                 </div>
-                
+
                 <div>
                     <label class="block text-sm font-medium text-gray-700 mb-2">Password</label>
                     <input 
@@ -40,7 +40,7 @@
                         required
                     >
                 </div>
-                
+
                 <button 
                     type="submit" 
                     id="loginBtn"
@@ -48,7 +48,7 @@
                 >
                     Sign In
                 </button>
-                
+
                 <div id="loginError" class="hidden text-red-600 text-sm text-center"></div>
             </form>
         </div>
@@ -112,6 +112,36 @@
                         </div>
                     </div>
 
+                    <!-- Upload Settings -->
+                    <div class="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                        <h3 class="font-semibold text-gray-800 mb-3">Upload Settings</h3>
+                        <div class="space-y-3">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Delay between uploads (ms)</label>
+                                <input 
+                                    type="number" 
+                                    id="uploadDelay" 
+                                    value="500" 
+                                    min="100" 
+                                    max="5000"
+                                    class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                                >
+                                <p class="text-xs text-gray-500 mt-1">Recommended: 500ms to avoid rate limiting</p>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Max retry attempts</label>
+                                <input 
+                                    type="number" 
+                                    id="maxRetries" 
+                                    value="3" 
+                                    min="0" 
+                                    max="10"
+                                    class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                                >
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- Action Buttons -->
                     <div class="flex gap-4">
                         <button 
@@ -138,6 +168,7 @@
                         <div id="progressBar" class="bg-blue-600 h-3 transition-all duration-300" style="width: 0%"></div>
                     </div>
                     <p id="progressText" class="text-sm text-gray-600 mt-2 text-center"></p>
+                    <p id="retryText" class="text-xs text-orange-600 mt-1 text-center hidden"></p>
                 </div>
 
                 <!-- Results Section -->
@@ -172,6 +203,7 @@
     </div>
 
     <script>
+        // FIXED: Added trailing slash to match FastAPI endpoint
         const API_BASE_URL = 'https://api.aws.certgen.org/api';
         let authToken = null;
         let currentUser = null;
@@ -181,7 +213,7 @@
         window.onload = function() {
             const token = localStorage.getItem('authToken');
             const user = localStorage.getItem('currentUser');
-            
+
             if (token && user) {
                 authToken = token;
                 currentUser = JSON.parse(user);
@@ -192,39 +224,62 @@
         // Login Form Handler
         document.getElementById('loginForm').addEventListener('submit', async (e) => {
             e.preventDefault();
-            
+
             const email = document.getElementById('email').value;
             const password = document.getElementById('password').value;
             const loginBtn = document.getElementById('loginBtn');
             const loginError = document.getElementById('loginError');
-            
+
             loginBtn.disabled = true;
             loginBtn.textContent = 'Signing in...';
             loginError.classList.add('hidden');
-            
+
             try {
-                const response = await fetch(`${API_BASE_URL}/auth/login?email=${encodeURIComponent(email)}&password=${encodeURIComponent(password)}`, {
+                // Try JSON body approach first (better for CORS)
+                let response = await fetch(`${API_BASE_URL}/auth/login`, {
                     method: 'POST',
                     headers: {
-                        'accept': 'application/json'
-                    }
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    },
+                    body: JSON.stringify({ email, password })
                 });
-                
-                if (!response.ok) {
-                    throw new Error('Invalid credentials');
+
+                // If JSON body fails, fallback to query params
+                if (!response.ok && response.status === 422) {
+                    console.log('JSON body failed, trying query params...');
+                    response = await fetch(`${API_BASE_URL}/auth/login?email=${encodeURIComponent(email)}&password=${encodeURIComponent(password)}`, {
+                        method: 'POST',
+                        headers: {
+                            'Accept': 'application/json'
+                        }
+                    });
                 }
-                
+
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({}));
+                    throw new Error(errorData.detail || 'Invalid credentials');
+                }
+
                 const data = await response.json();
                 authToken = data.access_token;
                 currentUser = data.user;
-                
+
                 localStorage.setItem('authToken', authToken);
                 localStorage.setItem('currentUser', JSON.stringify(currentUser));
-                
+
                 showUploadSection();
-                
+
             } catch (error) {
-                loginError.textContent = error.message || 'Login failed';
+                console.error('Login error:', error);
+                let errorMsg = error.message;
+
+                // Check if it's a CORS error
+                if (error.message.includes('Failed to fetch') || error.name === 'TypeError') {
+                    errorMsg = 'CORS error: Cannot connect to API. Please enable CORS on the server or use a proxy.';
+                }
+
+                loginError.textContent = errorMsg;
                 loginError.classList.remove('hidden');
             } finally {
                 loginBtn.disabled = false;
@@ -259,7 +314,7 @@
                 const file = e.target.files[0];
                 const validExtensions = ['.xlsx', '.xls'];
                 const fileExt = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
-                
+
                 if (validExtensions.includes(fileExt)) {
                     fileName.textContent = `Selected: ${file.name}`;
                     document.getElementById('previewSection').classList.add('hidden');
@@ -285,12 +340,12 @@
         dropZone.addEventListener('drop', (e) => {
             e.preventDefault();
             dropZone.classList.remove('border-blue-500', 'bg-blue-50');
-            
+
             if (e.dataTransfer.files.length > 0) {
                 const file = e.dataTransfer.files[0];
                 const validExtensions = ['.xlsx', '.xls'];
                 const fileExt = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
-                
+
                 if (validExtensions.includes(fileExt)) {
                     fileInput.files = e.dataTransfer.files;
                     fileName.textContent = `Selected: ${file.name}`;
@@ -311,16 +366,16 @@
             }
 
             const reader = new FileReader();
-            
+
             reader.onload = function(e) {
                 try {
                     const data = new Uint8Array(e.target.result);
                     const workbook = XLSX.read(data, { type: 'array' });
-                    
+
                     // Get first sheet
                     const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
                     const jsonData = XLSX.utils.sheet_to_json(firstSheet);
-                    
+
                     if (jsonData.length === 0) {
                         alert('No data found in Excel file');
                         return;
@@ -403,15 +458,15 @@
                     const previewSection = document.getElementById('previewSection');
                     const previewText = document.getElementById('previewText');
                     const sampleData = document.getElementById('sampleData');
-                    
+
                     previewSection.classList.remove('hidden');
                     previewText.textContent = `✓ Parsed ${parsedPatents.length} patents successfully. Ready to upload!`;
-                    
+
                     // Show first patent as sample
                     if (parsedPatents.length > 0) {
                         sampleData.innerHTML = `<strong>Sample (First Patent):</strong><pre class="mt-2">${JSON.stringify(parsedPatents[0], null, 2)}</pre>`;
                     }
-                    
+
                     console.log('Parsed patents:', parsedPatents);
                     console.log('First patent sample:', parsedPatents[0]);
 
@@ -427,61 +482,55 @@
         // Upload Form Handler
         document.getElementById('uploadForm').addEventListener('submit', async (e) => {
             e.preventDefault();
-            
+
             if (parsedPatents.length === 0) {
                 alert('Please parse the Excel file first using "Parse & Preview" button');
                 return;
             }
-            
+
             await uploadPatents();
         });
 
-        // Upload Patents Function
-        async function uploadPatents() {
-            const uploadBtn = document.getElementById('uploadBtn');
-            const parseBtn = document.getElementById('parseBtn');
-            const progressSection = document.getElementById('progressSection');
-            const progressBar = document.getElementById('progressBar');
-            const progressText = document.getElementById('progressText');
-            const results = document.getElementById('results');
-            
-            uploadBtn.disabled = true;
-            parseBtn.disabled = true;
-            progressSection.classList.remove('hidden');
-            results.classList.add('hidden');
-            
-            let successCount = 0;
-            let errorCount = 0;
-            const errors = [];
-            
-            for (let i = 0; i < parsedPatents.length; i++) {
-                const patent = parsedPatents[i];
-                const progress = ((i + 1) / parsedPatents.length) * 100;
-                
-                progressBar.style.width = progress + '%';
-                progressText.textContent = `Uploading patent ${i + 1} of ${parsedPatents.length}: ${patent.tracking_id}`;
-                
+        // Helper function to upload a single patent with retry logic
+        async function uploadSinglePatent(patent, patentIndex, maxRetries) {
+            const retryText = document.getElementById('retryText');
+
+            for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
                 try {
-                    console.log(`Uploading patent ${i + 1}:`, patent);
-                    
-                    const response = await fetch(`${API_BASE_URL}/patents`, {
+                    if (attempt > 1) {
+                        retryText.textContent = `Retrying patent ${patentIndex} (attempt ${attempt}/${maxRetries + 1})...`;
+                        retryText.classList.remove('hidden');
+                        // Exponential backoff: 1s, 2s, 4s...
+                        await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, attempt - 2)));
+                    }
+
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+
+                    // FIXED: Added trailing slash to match FastAPI endpoint
+                    const response = await fetch(`${API_BASE_URL}/patents/`, {
                         method: 'POST',
                         headers: {
                             'Authorization': `Bearer ${authToken}`,
                             'Content-Type': 'application/json',
-                            'accept': 'application/json'
+                            'Accept': 'application/json'
                         },
-                        body: JSON.stringify(patent)
+                        body: JSON.stringify(patent),
+                        signal: controller.signal
                     });
-                    
+
+                    clearTimeout(timeoutId);
+
                     if (response.ok) {
-                        successCount++;
-                        console.log(`✓ Patent ${i + 1} uploaded successfully`);
+                        retryText.classList.add('hidden');
+                        return { success: true };
+                    } else if (response.status === 429) {
+                        // Rate limited - wait longer
+                        console.log(`Rate limited on patent ${patentIndex}, waiting 5 seconds...`);
+                        await new Promise(resolve => setTimeout(resolve, 5000));
+                        continue; // Retry
                     } else {
-                        const errorData = await response.json();
-                        errorCount++;
-                        console.error(`✗ Patent ${i + 1} failed:`, errorData);
-                        
+                        const errorData = await response.json().catch(() => ({ detail: 'Unknown error' }));
                         let errorMsg = 'Unknown error';
                         if (errorData.detail) {
                             if (Array.isArray(errorData.detail)) {
@@ -490,30 +539,89 @@
                                 errorMsg = errorData.detail;
                             }
                         }
-                        
-                        errors.push({
-                            row: i + 1,
-                            tracking_id: patent.tracking_id,
-                            error: errorMsg
-                        });
+                        return { success: false, error: errorMsg };
                     }
                 } catch (error) {
+                    console.error(`Error on attempt ${attempt} for patent ${patentIndex}:`, error);
+
+                    if (error.name === 'AbortError') {
+                        console.log(`Request timeout for patent ${patentIndex}`);
+                    }
+
+                    // If this is the last attempt, return the error
+                    if (attempt === maxRetries + 1) {
+                        let errorMsg = error.message;
+                        if (error.message.includes('Failed to fetch') || error.name === 'TypeError') {
+                            errorMsg = 'Network/CORS error';
+                        } else if (error.name === 'AbortError') {
+                            errorMsg = 'Request timeout';
+                        }
+                        return { success: false, error: errorMsg };
+                    }
+                    // Otherwise, continue to retry
+                }
+            }
+
+            return { success: false, error: 'Max retries exceeded' };
+        }
+
+        // Upload Patents Function with retry logic
+        async function uploadPatents() {
+            const uploadBtn = document.getElementById('uploadBtn');
+            const parseBtn = document.getElementById('parseBtn');
+            const progressSection = document.getElementById('progressSection');
+            const progressBar = document.getElementById('progressBar');
+            const progressText = document.getElementById('progressText');
+            const retryText = document.getElementById('retryText');
+            const results = document.getElementById('results');
+
+            const uploadDelay = parseInt(document.getElementById('uploadDelay').value) || 500;
+            const maxRetries = parseInt(document.getElementById('maxRetries').value) || 3;
+
+            uploadBtn.disabled = true;
+            parseBtn.disabled = true;
+            progressSection.classList.remove('hidden');
+            results.classList.add('hidden');
+            retryText.classList.add('hidden');
+
+            let successCount = 0;
+            let errorCount = 0;
+            const errors = [];
+
+            for (let i = 0; i < parsedPatents.length; i++) {
+                const patent = parsedPatents[i];
+                const progress = ((i + 1) / parsedPatents.length) * 100;
+
+                progressBar.style.width = progress + '%';
+                progressText.textContent = `Uploading patent ${i + 1} of ${parsedPatents.length}: ${patent.tracking_id}`;
+
+                console.log(`Uploading patent ${i + 1}:`, patent);
+
+                const result = await uploadSinglePatent(patent, i + 1, maxRetries);
+
+                if (result.success) {
+                    successCount++;
+                    console.log(`✓ Patent ${i + 1} uploaded successfully`);
+                } else {
                     errorCount++;
-                    console.error(`✗ Patent ${i + 1} error:`, error);
+                    console.error(`✗ Patent ${i + 1} failed:`, result.error);
                     errors.push({
                         row: i + 1,
                         tracking_id: patent.tracking_id,
-                        error: error.message
+                        error: result.error
                     });
                 }
-                
-                // Small delay to avoid rate limiting
-                await new Promise(resolve => setTimeout(resolve, 100));
+
+                // Delay between uploads (except for last one)
+                if (i < parsedPatents.length - 1) {
+                    await new Promise(resolve => setTimeout(resolve, uploadDelay));
+                }
             }
-            
+
             progressBar.style.width = '100%';
             progressText.textContent = 'Upload complete!';
-            
+            retryText.classList.add('hidden');
+
             // Display results
             displayResults({
                 message: 'Upload process completed',
@@ -523,10 +631,10 @@
                     errors: errors
                 }
             }, errorCount === 0);
-            
+
             uploadBtn.disabled = false;
             parseBtn.disabled = false;
-            
+
             setTimeout(() => {
                 progressSection.classList.add('hidden');
                 progressBar.style.width = '0%';
@@ -537,11 +645,11 @@
         function displayResults(data, success) {
             const results = document.getElementById('results');
             results.classList.remove('hidden');
-            
+
             if (success || data.results.total_success > 0) {
                 const resultData = data.results || data;
                 results.className = 'mt-6 p-6 rounded-xl bg-green-50 border-2 border-green-200';
-                
+
                 let html = `
                     <div class="flex items-start gap-3 mb-4">
                         <svg class="w-6 h-6 text-green-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -552,7 +660,7 @@
                             <p class="text-green-700 mt-2">✓ Successfully uploaded: <span class="font-semibold">${resultData.total_success}</span> patents</p>
                             ${resultData.total_errors > 0 ? `<p class="text-orange-600 mt-1">⚠ Errors: <span class="font-semibold">${resultData.total_errors}</span></p>` : ''}
                 `;
-                
+
                 // Display errors if any
                 if (resultData.errors && resultData.errors.length > 0) {
                     html += '<div class="mt-4 bg-orange-50 p-3 rounded-lg border border-orange-200">';
@@ -563,7 +671,7 @@
                     });
                     html += '</ul></div>';
                 }
-                
+
                 html += '</div></div>';
                 results.innerHTML = html;
             } else {
@@ -584,4 +692,3 @@
     </script>
 </body>
 </html>
-
